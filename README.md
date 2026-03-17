@@ -5,7 +5,7 @@
 ## 🔗 Quick Access
 - 📄 **Project Summary:** [View Project Summary](https://drive.google.com/file/d/1EZjdrR49Nqyg1o6sE15Njif3CQOuc2i5/view?usp=sharing)  
 - 📊 **PPT Presentation:** [View Presentation](https://www.canva.com/design/DAHDv8u_L7U/N9NNSR8VII2TGHBYm4Bp-g/edit?utm_content=DAHDv8u_L7U&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton)  
-- 🎥 **Demo Video:** [Watch Demo](https://drive.google.com/file/d/18EgFS6jbjXA4tq0yekVPPXW5OqzoNtCR/view?usp=sharing)  
+- 🎥 **Demo Video:** [Watch Demo](https://drive.google.com/file/d/1INe273pRRlk0p0bejMcx-GkoBuT3AKYy/view?usp=sharing)  
 
 ---
 
