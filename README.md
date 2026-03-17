@@ -3,7 +3,7 @@
 # AI Platform for Detecting Fake News in Indian Languages
 
 ## 🔗 Quick Access
-- 📄 **Project Summary:** [View Project Summary](https://drive.google.com/file/d/1_8j5dwWsevFhoH7nZBqEpI8WEVHcuGB2/view?usp=drive_link)  
+- 📄 **Project Summary:** [View Project Summary](https://drive.google.com/file/d/1EZjdrR49Nqyg1o6sE15Njif3CQOuc2i5/view?usp=sharing)  
 - 📊 **PPT Presentation:** [View Presentation](https://www.canva.com/design/DAHDv8u_L7U/N9NNSR8VII2TGHBYm4Bp-g/edit?utm_content=DAHDv8u_L7U&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton)  
 - 🎥 **Demo Video:** [Watch Demo](https://drive.google.com/file/d/18EgFS6jbjXA4tq0yekVPPXW5OqzoNtCR/view?usp=sharing)  
 
@@ -50,10 +50,13 @@ Our project is an AI-powered platform that detects fake news across multiple Ind
 
 ## Tech Stack
 - **Frontend:** HTML, CSS, JavaScript  
-- **Backend:** Node.js  
-- **AI/NLP:** Groq API, TF-IDF, heuristic models  
+- **Backend:** Node.js + FastAPI (Python)  
+- **AI/NLP:** Groq API, TF-IDF, heuristic models, Scikit-learn  
+- **Computer Vision (OCR/Image):** OpenCV, DeepFace  
+- **Machine Learning:** TensorFlow / Keras  
 - **APIs:** Google Fact Check API, News APIs  
-- **Data:** Verified claims dataset (JSON)  
+- **Data Handling:** NumPy, Pydantic  
+- **Server:** Uvicorn  
 
 ---
 
