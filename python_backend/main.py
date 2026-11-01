@@ -1,17 +1,14 @@
 """
 python_backend/main.py
-FastAPI microservice — port 8000
+FastAPI microservice
   POST /deepfake      — DeepFace + OpenCV image manipulation detection
   POST /ml-classify   — TF-IDF + Logistic Regression fake news classifier
   GET  /health        — service health check
 """
 
-import os
-import io
 import base64
 import logging
 import pickle
-import re
 import random
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -30,7 +27,7 @@ log = logging.getLogger(__name__)
 BASE_DIR   = Path(__file__).parent
 MODEL_PATH = BASE_DIR / "ml_model.pkl"
 
-# ── ML model (loaded at startup) ──────────────────────────────────────────────
+# ── ML model (loaded at startup or on first request) ──────────────────────────
 _ml_pipeline = None   # sklearn Pipeline: TfidfVectorizer + LogisticRegression
 
 
@@ -43,11 +40,14 @@ def _train_or_load_model():
     from sklearn.linear_model import LogisticRegression
 
     if MODEL_PATH.exists():
-        log.info("Loading ML model from disk…")
-        with open(MODEL_PATH, "rb") as f:
-            _ml_pipeline = pickle.load(f)
-        log.info("ML model loaded ✓")
-        return
+        try:
+            log.info("Loading ML model from disk…")
+            with open(MODEL_PATH, "rb") as f:
+                _ml_pipeline = pickle.load(f)
+            log.info("ML model loaded ✓")
+            return
+        except Exception as e:
+            log.warning("Could not load saved model (%s) — retraining", e)
 
     log.info("Training ML model on synthetic dataset…")
 
@@ -146,10 +146,13 @@ def _train_or_load_model():
     ])
     _ml_pipeline.fit(list(texts), list(labels))
 
-    with open(MODEL_PATH, "wb") as f:
-        pickle.dump(_ml_pipeline, f)
-
-    log.info("ML model trained and saved ✓")
+    # Saving is optional: hosts like Vercel have a read-only filesystem.
+    try:
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(_ml_pipeline, f)
+        log.info("ML model trained and saved ✓")
+    except OSError:
+        log.info("ML model trained in memory (read-only filesystem) ✓")
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -157,7 +160,11 @@ def _train_or_load_model():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Starting up Python microservice…")
-    _train_or_load_model()
+    try:
+        _train_or_load_model()
+    except Exception as e:
+        # Don't crash startup — the model is loaded lazily on first request.
+        log.error("Model init failed at startup: %s", e)
     log.info("Python microservice ready ✓")
     yield
     log.info("Shutting down…")
@@ -174,11 +181,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Request models ─────────────────────────────────────────────────────────────
+
+# ── Request models ────────────────────────────────────────────────────────────
 
 class DeepfakeRequest(BaseModel):
     imageBase64: str
     mimeType: str = "image/jpeg"
+
 
 class MLRequest(BaseModel):
     claim: str
@@ -197,9 +206,9 @@ def _decode_image(b64: str) -> np.ndarray:
 
 def _ela_score(img: np.ndarray) -> float:
     """Error Level Analysis — higher score = more likely manipulated (0–100)."""
-    _, encoded   = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75])
-    compressed   = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-    diff         = cv2.absdiff(img, compressed).astype(np.float32)
+    _, encoded = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75])
+    compressed = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+    diff       = cv2.absdiff(img, compressed).astype(np.float32)
     return min(float(np.mean(diff) * 10), 100.0)
 
 
@@ -227,8 +236,8 @@ def _metadata_flags(img: np.ndarray) -> list:
     if lap_var < 20:
         flags.append("Very low sharpness variance — possible cloning or blur manipulation")
 
-    b, g, r      = cv2.split(img)
-    channel_std  = float(np.std([b.mean(), g.mean(), r.mean()]))
+    b, g, r     = cv2.split(img)
+    channel_std = float(np.std([b.mean(), g.mean(), r.mean()]))
     if channel_std > 40:
         flags.append("Unusual colour channel imbalance — possible filter or splice")
 
@@ -274,20 +283,27 @@ def _manipulation_label(score: float) -> str:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+@app.get("/")
+async def root():
+    return {"service": "Credible Chronicles ML Service", "status": "running"}
+
+
 @app.get("/health")
 async def health():
     try:
-        import sklearn; sklearn_ok = True    # noqa: E401
+        import sklearn  # noqa: F401
+        sklearn_ok = True
     except ImportError:
         sklearn_ok = False
     try:
-        import deepface; deepface_ok = True  # noqa: E401
+        import deepface  # noqa: F401
+        deepface_ok = True
     except ImportError:
         deepface_ok = False
 
     return {
         "status":        "ok",
-        "model_trained": MODEL_PATH.exists(),
+        "model_loaded":  _ml_pipeline is not None,
         "services": {
             "opencv":   True,
             "sklearn":  sklearn_ok,
@@ -331,14 +347,16 @@ async def deepfake_detect(req: DeepfakeRequest):
 async def ml_classify(req: MLRequest):
     if not req.claim or not req.claim.strip():
         raise HTTPException(400, "claim required")
-    if _ml_pipeline is None:
-        raise HTTPException(503, "ML model not loaded yet — try again shortly")
 
-    claim = req.claim.strip()[:2000]
-    proba     = _ml_pipeline.predict_proba([claim])[0]
-    fake_prob = round(float(proba[1]) * 100, 1)
-    real_prob = round(float(proba[0]) * 100, 1)
-    confidence= round(max(fake_prob, real_prob), 1)
+    # Lazy load: works even if the startup hook did not run (serverless hosts)
+    if _ml_pipeline is None:
+        _train_or_load_model()
+
+    claim      = req.claim.strip()[:2000]
+    proba      = _ml_pipeline.predict_proba([claim])[0]
+    fake_prob  = round(float(proba[1]) * 100, 1)
+    real_prob  = round(float(proba[0]) * 100, 1)
+    confidence = round(max(fake_prob, real_prob), 1)
 
     label = (
         "Likely Fake"         if fake_prob >= 70 else
@@ -349,22 +367,22 @@ async def ml_classify(req: MLRequest):
 
     # Top features pushing toward fake
     try:
-        vec        = _ml_pipeline.named_steps["tfidf"]
-        clf        = _ml_pipeline.named_steps["clf"]
-        features   = vec.get_feature_names_out()
-        tfidf_vec  = vec.transform([claim])
-        coefs      = clf.coef_[0]
-        nonzero    = tfidf_vec.nonzero()[1]
-        scored     = [(features[i], float(coefs[i] * tfidf_vec[0, i])) for i in nonzero]
-        top_signals= [f for f, s in sorted(scored, key=lambda x: -x[1])[:5] if s > 0]
+        vec         = _ml_pipeline.named_steps["tfidf"]
+        clf         = _ml_pipeline.named_steps["clf"]
+        features    = vec.get_feature_names_out()
+        tfidf_vec   = vec.transform([claim])
+        coefs       = clf.coef_[0]
+        nonzero     = tfidf_vec.nonzero()[1]
+        scored      = [(features[i], float(coefs[i] * tfidf_vec[0, i])) for i in nonzero]
+        top_signals = [f for f, s in sorted(scored, key=lambda x: -x[1])[:5] if s > 0]
     except Exception:
         top_signals = []
 
     return {
-        "fake_probability":  fake_prob,
-        "real_probability":  real_prob,
-        "confidence":        confidence,
-        "label":             label,
-        "top_fake_signals":  top_signals,
-        "model":             "TF-IDF + Logistic Regression (local)",
+        "fake_probability": fake_prob,
+        "real_probability": real_prob,
+        "confidence":       confidence,
+        "label":            label,
+        "top_fake_signals": top_signals,
+        "model":            "TF-IDF + Logistic Regression (local)",
     }
